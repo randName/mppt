@@ -1,8 +1,7 @@
 #include <WiFiClient.h>
+#include <PubSubClient.h>
 #include <SoftwareSerial.h>
-
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
 
 #include "credentials.h"
 
@@ -10,7 +9,7 @@
 
 SoftwareSerial VESerial;
 WiFiClient client;
-HTTPClient http;
+PubSubClient mqtt(client);
 
 // error, charge, load
 unsigned int STATES[] = {0, 0, 0};
@@ -41,6 +40,7 @@ bool isUpdated(int idx) {
 
 void handleLine(String line) {
   int sep = line.indexOf("\t");
+  if (sep < 0) return;
   String label = line.substring(0, sep);
 
   if (label == "LOAD") {
@@ -69,21 +69,11 @@ void handleLine(String line) {
   }
 }
 
-void send(String label, int value) {
-  if (http.begin(client, AIO_URL + label + "/data")) {
-    http.addHeader("content-type", "application/x-www-form-urlencoded");
-    http.addHeader("x-aio-key", AIO_KEY);
-    int code = http.POST("value=" + String(value));
-    if (code > 0) {
-      String resp = http.getString();
-      if (code < 400) {
-        Serial.println(resp.substring(7, 33));
-      } else {
-        Serial.println(resp);
-      }
-    }
-    http.end();
-  }
+void send(String feed, int value) {
+  boolean ok = mqtt.publish((String(AIO_USER) + "/feeds/mppt." + feed).c_str(), String(value).c_str());
+  Serial.printf("%d ", ok ? 1 : 0);
+  Serial.print(feed);
+  Serial.printf("\t%d\n", value);
 }
 
 void setup(void){
@@ -113,6 +103,7 @@ void setup(void){
     }
   }
 
+  mqtt.setServer(AIO_HOST, AIO_PORT);
   digitalWrite(LED_BUILTIN, 1);
 }
 
@@ -134,6 +125,8 @@ void loop(void){
 
   now = millis();
   if (now - last < 5000) return;
+
+  if (!mqtt.connect("mppt", AIO_USER, AIO_KEY)) return;
 
   switch (idx) {
     case 0:
